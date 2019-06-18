@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: A stack for executing self-hosted renovate service in AWS Fargate.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: renovate
+    Description: A name for the cluster
+  TaskName:
+    Type: String
+    Default: renovate-runner
+    Description: A name for the task
+  ContainerCpu:
+    Type: Number
+    Default: 1024
+    Description: How much CPU to give the container. 1024 is 1 CPU
+  ContainerMemory:
+    Type: Number
+    Default: 2048
+    Description: How much memory in megabytes to give the container
+  ContainerVpcId:
+    Type: String
+    Description: A VPC Id of Task Container
+  ContainerSubnets:
+    Type: CommaDelimitedList
+    Description: Comma-delimited list of subnet ids
+  RenovateTokenSecretArn:
+    Type: String
+    Default: ''
+    Description: A Secret (from Secrets Manager service) ARN of Renovate Token for accessing Github.
+  RenovateCronPattern:
+    Type: String
+    Default: 'cron(0 * ? * MON-FRI *)'
+    Description: A cron pattern for executing renovate runner periodically
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref 'ClusterName'
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Rules which allow ECS to attach network interfaces to instances
+                  # on your behalf in order for awsvpc networking mode to work right
+                  - 'ec2:AttachNetworkInterface'
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:CreateNetworkInterfacePermission'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:DeleteNetworkInterfacePermission'
+                  - 'ec2:Describe*'
+                  - 'ec2:DetachNetworkInterface'
+                Resource: '*'
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Allow the ECS Tasks to download images from ECR
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+
+                  # Allow the ECS tasks to upload logs to CloudWatch
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+              - Effect: Allow
+                # Allow retrieving secrets
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref RenovateTokenSecretArn
+  RenovateTaskLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['/', [!Ref 'ClusterName', !Ref 'TaskName']]
+      RetentionInDays: 30
+  RenovateTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - ecs-tasks.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+      Path: /
+      # Add your own policy if needed
+#      Policies:
+#        - PolicyName: RenovateTaskRolePolicy
+#          PolicyDocument:
+#            Statement:
+#               - Effect: Allow
+#                 Action:
+#                   - 's3:getObject'
+#                 Resource: '*'
+  RenovateTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref 'TaskName'
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref 'RenovateTaskRole'
+      ContainerDefinitions:
+        - Name: !Ref 'TaskName'
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: 'renovate/renovate'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref 'RenovateTaskLogGroup'
+              awslogs-stream-prefix: renovate
+          # Add your own renovate configuration via Environment variable if needed
+#          Environment:
+#            - Name: RENOVATE_AUTODISCOVERY
+#              Value: true
+          Secrets:
+            - Name: RENOVATE_TOKEN
+              ValueFrom: !Ref 'RenovateTokenSecretArn'
+  RenovateTaskContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for Renovate task container
+      VpcId: !Ref 'ContainerVpcId'
+  RenovateTaskScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: RenovateTaskScheduleRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecs:RunTask'
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    'ecs:cluster': !GetAtt 'ECSCluster.Arn'
+              - Effect: Allow
+                Action: 'iam:PassRole'
+                Resource:
+                  - !GetAtt 'ECSTaskExecutionRole.Arn'
+                  - !GetAtt 'RenovateTaskRole.Arn'
+
+  # @note Currently CloudFormation does not support setting ECS Fargate to Cloudwatch Event Rule Target.
+  # You must update rule target manually until AWS supports that!
+  # @see update-cloudwatch-event.js
+  RenovateTaskSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Join ['-', ['schedule', !Ref 'TaskName']]
+      Description: 'Execute the Renovate worker every hours'
+      ScheduleExpression: !Ref 'RenovateCronPattern'
+      State: ENABLED
+      Targets:
+        - Id: !Ref 'TaskName'
+          Arn: !GetAtt 'ECSCluster.Arn'
+          RoleArn: !GetAtt 'RenovateTaskScheduleRole.Arn'
+          EcsParameters:
+            TaskDefinitionArn: !Ref 'RenovateTaskDefinition'
+            TaskCount: 1
+
+Outputs:
+  ECSCluster:
+    Description: The ARN of the ECS cluster
+    Value: !GetAtt 'ECSCluster.Arn'
+  ECSRole:
+    Description: The ARN of the ECS role
+    Value: !GetAtt 'ECSRole.Arn'
+  TaskName:
+    Description: The name of the Task
+    Value: !Ref 'TaskName'
+  ECSTaskDefinition:
+    Description: The ARN of the ECS Task Definition
+    Value: !Ref 'RenovateTaskDefinition'
+  ECSTaskExecutionRole:
+    Description: The ARN of the ECS role
+    Value: !GetAtt 'ECSTaskExecutionRole.Arn'
+  VpcId:
+    Description: The ID of the associated VPC
+    Value: !Ref 'ContainerVpcId'
+  SubnetIds:
+    Value: !Join [ ',', !Ref 'ContainerSubnets']
+  SecurityGroupId:
+    Value: !Ref 'RenovateTaskContainerSecurityGroup'
+  CloudwatchEventRuleName:
+    Value: !Ref 'RenovateTaskSchedule'
+  CloudwatchEventRole:
+    Description: The ARN of the Cloudwatch Event Role
+    Value: !GetAtt 'RenovateTaskScheduleRole.Arn'

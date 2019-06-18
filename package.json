@@ -1,0 +1,28 @@
+{
+  "name": "serverless-renovate-fargate",
+  "version": "1.0.0",
+  "description": "Serverless deployment of renovate service",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mooyoul/serverless-renovate-fargate.git"
+  },
+  "keywords": [
+    "renovate",
+    "fargate",
+    "aws",
+    "ecs"
+  ],
+  "author": "MooYeol Prescott Lee <mooyoul@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/mooyoul/serverless-renovate-fargate/issues"
+  },
+  "homepage": "https://github.com/mooyoul/serverless-renovate-fargate#readme",
+  "dependencies": {
+    "aws-sdk": "^2.477.0"
+  }
+}
