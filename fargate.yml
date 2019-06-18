@@ -191,6 +191,7 @@ Resources:
   # @note Currently CloudFormation does not support setting ECS Fargate to Cloudwatch Event Rule Target.
   # You must update rule target manually until AWS supports that!
   # @see update-cloudwatch-event.js
+  # @see https://github.com/aws/containers-roadmap/issues/92
   RenovateTaskSchedule:
     Type: AWS::Events::Rule
     Properties:
