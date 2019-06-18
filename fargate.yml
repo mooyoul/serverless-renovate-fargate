@@ -134,7 +134,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      ExecutionRoleArn: !Ref 'ECSTaskExecutionRole'
       TaskRoleArn: !Ref 'RenovateTaskRole'
       ContainerDefinitions:
         - Name: !Ref 'TaskName'
