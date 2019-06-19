@@ -34,6 +34,7 @@ you should prepare below resources:
 - VPC for associating Fargate container
 - Subnets for associating Fargate container. Subnets should be able to talk with Internet.
 - A Secret (Github Access Token) which is saved at [Secrets Manager](https://aws.amazon.com/secrets-manager/) for accessing GitHub service
+- *(Optional)* A Secret (NPM Token) which is saved at [Secrets Manager](https://aws.amazon.com/secrets-manager/) for accessing private npm packages
 - Node.js v8+ for scripting (see below for details)
 
 
@@ -49,6 +50,7 @@ ContainerVpcId | String | A VPC Id of Task Container | N/A
 ContainerSubnets: | String | Comma-delimited list of subnet ids | N/A
 RenovateTokenSecretArn | String | A Secret (from Secrets Manager service) ARN of Renovate Token for accessing Github. | N/A
 RenovateCronPattern | String | A cron pattern for executing renovate runner periodically | `cron(0 * ? * MON-FRI *)`
+NPMTokenSecretArn | String | A Secret (from Secrets Manager service) ARN of NPM Token for accessing private npm packages. | `(empty string)`
 
 
 ## IMPORTANT: Updating CloudWatch Event Rule 

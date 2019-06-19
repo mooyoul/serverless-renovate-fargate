@@ -29,10 +29,17 @@ Parameters:
     Type: String
     Default: ''
     Description: A Secret (from Secrets Manager service) ARN of Renovate Token for accessing Github.
+  NPMTokenSecretArn:
+    Type: String
+    Default: ''
+    Description: A Secret (from Secrets Manager service) ARN of NPM Token for accessing private npm packages.
   RenovateCronPattern:
     Type: String
     Default: 'cron(0 * ? * MON-FRI *)'
     Description: A cron pattern for executing renovate runner periodically
+
+Conditions:
+  HasNPMToken: !Not [ !Equals [!Ref 'NPMTokenSecretArn', ''] ]
 
 Resources:
   ECSCluster:
@@ -98,7 +105,10 @@ Resources:
                 # Allow retrieving secrets
                 Action:
                   - 'secretsmanager:GetSecretValue'
-                Resource: !Ref RenovateTokenSecretArn
+                Resource:
+                  - !Ref 'RenovateTokenSecretArn'
+                  - !If ['HasNPMToken', !Ref 'NPMTokenSecretArn', !Ref 'AWS::NoValue']
+
   RenovateTaskLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -141,6 +151,8 @@ Resources:
           Cpu: !Ref 'ContainerCpu'
           Memory: !Ref 'ContainerMemory'
           Image: 'renovate/renovate'
+          Command:
+            - 'balmbees/vingle-report'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -154,6 +166,12 @@ Resources:
           Secrets:
             - Name: RENOVATE_TOKEN
               ValueFrom: !Ref 'RenovateTokenSecretArn'
+            - Fn::If:
+                - 'HasNPMToken'
+                - Name: NPM_TOKEN
+                  ValueFrom: !Ref 'NPMTokenSecretArn'
+                - !Ref 'AWS::NoValue'
+
   RenovateTaskContainerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
